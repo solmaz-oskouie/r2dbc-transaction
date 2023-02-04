@@ -17,6 +17,10 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
+import java.util.List;
+import java.util.Objects;
+import java.util.concurrent.ThreadLocalRandom;
+
 @SpringBootTest
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class R2dbcTransactionApplicationTests {
@@ -64,6 +68,50 @@ class R2dbcTransactionApplicationTests {
 
     }
 
+    @DisplayName("""
+            Flux model:
+            Deposit money successfully without calling remote service
+            """)
+    @Test
+    void transactionSuccessFlux() {
+
+        List<Account> accountList = Flux.range(1, 4)
+                .map(i -> DepositRequest.create(i, ThreadLocalRandom.current().nextInt(100, 999)))
+                .flatMap(request -> bankService.deposit(request)
+                        .onErrorResume(ex -> {
+                            logger.general().error("remote service calling went with an custom exception", ex);
+                            return Mono.empty();
+                        })
+                        .then(getAccountDetails(request))
+
+                ).collectList().block();
+
+        assert accountList != null;
+        boolean allMatch = accountList.stream().map(Account::getBalance).allMatch(balance -> balance >0);
+        assert allMatch==Boolean.TRUE;
+
+    }
+
+
+    @Test
+    void depositWithTransactionFailureWhenThrowCustomExceptionFlux(){
+        List<Account> accountList = Flux.range(1, 4)
+                .map(i -> DepositRequest.create(i, ThreadLocalRandom.current().nextInt(100, 999)))
+                .flatMap(request -> bankService.depositWithRemoteServiceCall(request)
+                        .onErrorResume(ex -> {
+                            logger.general().error("remote service calling went with an custom exception", ex);
+                            return Mono.empty();
+                        })
+                        .then(getAccountDetails(request))
+
+
+                ).collectList().block();
+        assert accountList != null;
+        boolean allMatch = accountList.stream().map(Account::getBalance).allMatch(balance -> balance == 0);
+        assert allMatch==Boolean.TRUE;
+
+
+    }
 
 
 
@@ -139,6 +187,33 @@ class R2dbcTransactionApplicationTests {
 
 
 
+    @DisplayName("""
+            Flux model:
+            Deposit money successfully  without calling remote service (declarative transaction style)
+            """)
+
+    @Test
+    void depositWithDeclarativeTransactionSuccessFlux() {
+
+        List<Account> accountList = Flux.range(1, 4)
+                .map(i -> DepositRequest.create(i, ThreadLocalRandom.current().nextInt(100, 999)))
+                .flatMap(request -> bankService.depositWithDeclarativeTransaction(request)
+                        .onErrorResume(ex -> {
+                            logger.general().error("remote service calling went with an custom exception", ex);
+                            return Mono.empty();
+                        })
+                        .then(getAccountDetails(request))
+
+                ).collectList().block();
+
+        assert accountList != null;
+        boolean allMatch = accountList.stream().map(Account::getBalance).allMatch(balance -> balance >0);
+        assert allMatch==Boolean.TRUE;
+
+    }
+
+
+
 
     @DisplayName("""
             Deposit money without calling remote service with declarative transaction.
@@ -167,12 +242,55 @@ class R2dbcTransactionApplicationTests {
     }
 
 
+    @DisplayName("""
+            Flux Model:           
+            Deposit money without calling remote service with declarative transaction.
+            depositing money less than 100 will result in DataIntegrityViolationException(DB Exception).
+            """)
+
+    @Test
+    void depositWithDeclarativeTransactionFailureFlux(){
+
+        List<Account> accountList = Flux.range(1, 4)
+                .map(i -> DepositRequest.create(i, ThreadLocalRandom.current().nextInt(100, 999)))
+                .flatMap(request -> bankService.depositWithDeclarativeTransaction(request)
+                        .onErrorResume(ex -> {
+                            logger.general().error("remote service calling went with an custom exception", ex);
+                            return Mono.empty();
+                        })
+                        .then(getAccountDetails(request))
+
+                ).collectList().block();
+
+        assert accountList != null;
+        boolean allMatch = accountList.stream().map(Account::getBalance).allMatch(balance -> balance >0);
+        assert allMatch==Boolean.TRUE;
+
+
+        List<Account> accountList2 = Flux.range(1, 4)
+                .map(i -> DepositRequest.create(i, ThreadLocalRandom.current().nextInt(0, 99)))
+                .flatMap(request -> bankService.depositWithDeclarativeTransaction(request)
+                        .onErrorResume(ex -> {
+                            logger.general().error("remote service calling went with an custom exception", ex);
+                            return Mono.empty();
+                        })
+                        .then(getAccountDetails(request))
+
+                ).collectList().block();
+
+        assert accountList2 != null;
+        accountList2.removeAll(accountList);
+        assert accountList2.size()==0;
+    }
+
+
 
 
     @DisplayName("""
                         
             Deposit Money with calling remote service with declarative transaction.
             Remote service throws a custom exception.
+             deposit action is successful but remote service throws an exception.
             """)
     @Test
     void depositWithDeclarativeTransactionFailureWhenThrowCustomException() {
@@ -186,6 +304,33 @@ class R2dbcTransactionApplicationTests {
         StepVerifier.create(mono)
                 .expectNextMatches(ac -> ac.getBalance() == 0)
                 .verifyComplete();
+
+    }
+
+    @DisplayName("""
+            Flux model :          
+            Deposit Money with calling remote service with declarative transaction.
+            Remote service throws a custom exception.
+            deposit action is successful but remote service throws an exception.
+            """)
+
+    @Test
+    void depositWithDeclarativeTransactionFailureWhenThrowCustomExceptionFlux(){
+        List<Account> accountList = Flux.range(1, 4)
+                .map(i -> DepositRequest.create(i, ThreadLocalRandom.current().nextInt(100, 999)))
+                .flatMap(request -> bankService.depositWithDeclarativeTransactionWithCallingRemoteService(request)
+                        .onErrorResume(ex -> {
+                            logger.general().error("remote service calling went with an custom exception", ex);
+                            return Mono.empty();
+                        })
+                        .then(getAccountDetails(request))
+
+
+                ).collectList().block();
+        assert accountList != null;
+        boolean allMatch = accountList.stream().map(Account::getBalance).allMatch(balance -> balance == 0);
+        assert allMatch==Boolean.TRUE;
+
 
     }
 
