@@ -16,6 +16,7 @@ import org.springframework.transaction.interceptor.RuleBasedTransactionAttribute
 import org.springframework.transaction.reactive.TransactionalOperator;
 import reactor.core.publisher.Mono;
 
+import java.time.Duration;
 import java.util.List;
 
 @Service
@@ -43,9 +44,9 @@ public class BankService {
         transactionAttribute.setPropagationBehaviorName("PROPAGATION_REQUIRED");
         TransactionalOperator transactionalOperator = r2dbcTransactionConfiguration.getTransactionOperator(transactionAttribute);
 
-        return transactionalOperator.execute(tx -> this.accountRepository.findById(request.getAccount())
+        return transactionalOperator.execute(tx -> this.accountRepository.findEntityById(request.getAccount())
                 .doOnNext(ac -> ac.setBalance(ac.getBalance() + request.getAmount()))
-                .flatMap(this.accountRepository::save)
+                .flatMap(this.accountRepository::saveEntity)
                 .thenReturn(toEvent(request))
                 .flatMap(eventRepository::save)
         ).then();
@@ -59,12 +60,30 @@ public class BankService {
         transactionAttribute.setPropagationBehaviorName("PROPAGATION_REQUIRED");
         TransactionalOperator transactionalOperator = r2dbcTransactionConfiguration.getTransactionOperator(transactionAttribute);
 
-        return transactionalOperator.execute(tx -> this.accountRepository.findById(request.getAccount())
+        return transactionalOperator.execute(tx -> this.accountRepository.findEntityById(request.getAccount())
                 .doOnNext(ac -> ac.setBalance(ac.getBalance() + request.getAmount()))
-                .flatMap(this.accountRepository::save)
+                .flatMap(this.accountRepository::saveEntity)
                 .thenReturn(toEvent(request))
                 .flatMap(eventRepository::save)
                 .flatMap(moneyDepositEvent -> callRemoteService())
+        ).then();
+    }
+
+
+    public Mono<Void> depositWithTooSlowRemoteServiceCall(DepositRequest request) {
+        RuleBasedTransactionAttribute transactionAttribute = new RuleBasedTransactionAttribute();
+        RollbackRuleAttribute rollbackRuleAttribute = new RollbackRuleAttribute(MyCustomException.class);
+        transactionAttribute.setRollbackRules(List.of(rollbackRuleAttribute));
+        transactionAttribute.setIsolationLevelName("ISOLATION_READ_COMMITTED");
+        transactionAttribute.setPropagationBehaviorName("PROPAGATION_REQUIRED");
+        TransactionalOperator transactionalOperator = r2dbcTransactionConfiguration.getTransactionOperator(transactionAttribute);
+
+        return transactionalOperator.execute(tx -> this.accountRepository.findEntityById(request.getAccount())
+                .doOnNext(ac -> ac.setBalance(ac.getBalance() + request.getAmount()))
+                .flatMap(this.accountRepository::saveEntity)
+                .thenReturn(toEvent(request))
+                .flatMap(eventRepository::save)
+                .flatMap(moneyDepositEvent -> callTooSlowRemoteService())
         ).then();
     }
 
@@ -73,9 +92,9 @@ public class BankService {
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public Mono<Void> depositWithDeclarativeTransaction(DepositRequest request) {
-        return  this.accountRepository.findById(request.getAccount())
+        return  this.accountRepository.findEntityById(request.getAccount())
                 .doOnNext(ac -> ac.setBalance(ac.getBalance() + request.getAmount()))
-                .flatMap(this.accountRepository::save)
+                .flatMap(this.accountRepository::saveEntity)
                 .thenReturn(toEvent(request))
                 .flatMap(eventRepository::save)
         .then();
@@ -84,9 +103,9 @@ public class BankService {
 
     @Transactional(isolation = Isolation.READ_COMMITTED,rollbackFor = MyCustomException.class)
     public Mono<Void> depositWithDeclarativeTransactionWithCallingRemoteService(DepositRequest request) {
-        return  this.accountRepository.findById(request.getAccount())
+        return  this.accountRepository.findEntityById(request.getAccount())
                 .doOnNext(ac -> ac.setBalance(ac.getBalance() + request.getAmount()))
-                .flatMap(this.accountRepository::save)
+                .flatMap(this.accountRepository::saveEntity)
                 .thenReturn(toEvent(request))
                 .flatMap(eventRepository::save)
                 .flatMap(moneyDepositEvent -> callRemoteService())
@@ -109,6 +128,16 @@ public class BankService {
    //call remote service
     Mono<Void>callRemoteService(){
         return Mono.error(new MyCustomException());
+
+    }
+
+
+    Mono<Void>callTooSlowRemoteService(){
+        return Mono.just(30)
+                .log()
+                .delayElement(Duration.ofSeconds(2))
+                .log()
+                .then();
 
     }
 

@@ -10,7 +10,7 @@ import org.springframework.data.annotation.Id;
 @EqualsAndHashCode
 public class Account {
     @Id
-    private Long id;
+    private Integer id;
     private String userName;
     private Integer balance;
 }
